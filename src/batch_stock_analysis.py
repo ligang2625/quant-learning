@@ -201,6 +201,6 @@ if (__name__ == "__main__"):
     # =========================
     # 7. 打印结果
     # =========================
-    display_df = batch_stock_analysis(stock_list=stock_list, start_date=start_date, end_date=end_date)
+    display_df = batch_stock_analysis(stock_list=stock_list)
     print("\n风险收益排名表：")
     print(display_df)

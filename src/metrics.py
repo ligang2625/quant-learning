@@ -11,7 +11,7 @@ def calc_stock_metrics(df: pd.DataFrame, price_col: str = "close", get_df: bool 
     price_col: 用于计算收益率的价格列，默认使用 close
 
     返回：
-    dict: 包含累计收益、年化收益、年化波动率、最大回撤、夏普比率等指标
+    dict/pd.DataFrame: 包含累计收益、年化收益、年化波动率、最大回撤、夏普比率等指标
     """
 
     data = df.copy()

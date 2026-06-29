@@ -32,7 +32,7 @@ def get_single_stock(
     start_date: str = "20210101",
     end_date: str | None = None,
     adjust: str = "qfq",
-    save_to_loacl: bool = True
+    save_to_local: bool = True
 ) -> pd.DataFrame:
     """
     获取 A 股日线数据。
@@ -60,8 +60,8 @@ def get_single_stock(
             raise ValueError("东方财富接口返回空数据")
 
         print(f"东方财富接口成功：{symbol}")
-        if save_to_loacl:
-            df.to_csv(output_path = RAW_DIR / f"{symbol}_{adjust}_{period}.csv", index=False, encoding="utf-8-sig")
+        if save_to_local:
+            df.to_csv(RAW_DIR / f"{symbol}_{adjust}_{period}.csv", index=False, encoding="utf-8-sig")
         return df
 
     except Exception as e:
@@ -83,8 +83,8 @@ def get_single_stock(
 
         # 新浪接口没有股票代码列，补一列
         df["symbol"] = symbol
-        if save_to_loacl:
-            df.to_csv(output_path = RAW_DIR / f"{symbol}_{adjust}_{period}.csv", index=False, encoding="utf-8-sig")
+        if save_to_local:
+            df.to_csv(RAW_DIR / f"{symbol}_{adjust}_{period}.csv", index=False, encoding="utf-8-sig")
         print(f"新浪接口成功：{symbol}")
         return df
 
@@ -147,7 +147,7 @@ def clean_stock_data(
     data = data[keep_cols]
     
     if save_to_local:
-        data.to_csv(output_path = PROCESSED_DIR / f"{symbol}_clean.csv", index=False, encoding="utf-8-sig")
+        data.to_csv(PROCESSED_DIR / f"{symbol}_clean.csv", index=False, encoding="utf-8-sig")
     return data
 
 
