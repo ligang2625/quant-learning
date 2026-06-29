@@ -9,10 +9,12 @@ project_root = project_root = Path(__file__).resolve().parent.parent
 RAW_DIR = project_root / "data" / "raw"
 PROCESSED_DIR = project_root / "data" / "processed"
 REPORT_DIR = project_root / "reports"
+BACKTEST_REPORT_DIR = REPORT_DIR / "ma_20_60_backtest"
 
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
+BACKTEST_REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 import pandas as pd
@@ -550,7 +552,6 @@ def calculate_performance(
     }
 
 
-
 def calculate_buy_and_sell(result: pd.DataFrame) -> dict[str, float]:
     buy_count = (result["position_change"] == 1.0).sum()
     sell_count = (result["position_change"] == -1.0).sum()
@@ -566,6 +567,575 @@ def calculate_buy_and_sell(result: pd.DataFrame) -> dict[str, float]:
         "交易成本简单加总": total_transaction_cost
     }
 
+
+def summarize_backtest_result(
+    result: pd.DataFrame,
+    slow_window: int = 60,
+    annual_risk_free_rate: float = 0.0,
+    trading_days: int = 252,
+) -> dict:
+    """
+    对单只股票回测结果生成一行汇总。
+    """
+
+    required_cols = {
+        "date",
+        "symbol",
+        "slow_ma",
+        "position",
+        "position_change",
+        "strategy_return",
+        "asset_return",
+        "transaction_cost",
+    }
+
+    missing_cols = required_cols - set(result.columns)
+
+    if missing_cols:
+        raise ValueError(f"缺少必要字段：{sorted(missing_cols)}")
+
+    data = result.copy()
+
+    data["date"] = pd.to_datetime(data["date"])
+
+    symbol = (
+        data["symbol"]
+        .dropna()
+        .astype(str)
+        .str.zfill(6)
+        .iloc[0]
+    )
+
+    evaluation_mask = (
+        data["slow_ma"]
+        .shift(1)
+        .notna()
+    )
+
+    evaluation_data = (
+        data.loc[evaluation_mask]
+        .copy()
+        .reset_index(drop=True)
+    )
+
+    if evaluation_data.empty:
+        raise ValueError(
+            f"{symbol} 评价区间为空，请检查数据长度或 slow_window={slow_window}"
+        )
+
+    strategy_metrics = calculate_performance(
+        evaluation_data["strategy_return"],
+        annual_risk_free_rate=annual_risk_free_rate,
+        trading_days=trading_days,
+    )
+
+    benchmark_metrics = calculate_performance(
+        evaluation_data["asset_return"],
+        annual_risk_free_rate=annual_risk_free_rate,
+        trading_days=trading_days,
+    )
+
+    buy_count = int(
+        (evaluation_data["position_change"] > 0).sum()
+    )
+
+    sell_count = int(
+        (evaluation_data["position_change"] < 0).sum()
+    )
+
+    exposure = float(
+        evaluation_data["position"].mean()
+    )
+
+    total_transaction_cost = float(
+        evaluation_data["transaction_cost"].sum()
+    )
+
+    return {
+        "symbol": symbol,
+        "start_date": evaluation_data["date"].iloc[0],
+        "end_date": evaluation_data["date"].iloc[-1],
+        "trade_days": len(evaluation_data),
+
+        "strategy_cumulative_return": strategy_metrics["cumulative_return"],
+        "strategy_annual_return": strategy_metrics["annual_return"],
+        "strategy_annual_volatility": strategy_metrics["annual_volatility"],
+        "strategy_sharpe": strategy_metrics["sharpe_ratio"],
+        "strategy_max_drawdown": strategy_metrics["max_drawdown"],
+        "strategy_calmar": strategy_metrics["calmar_ratio"],
+
+        "benchmark_cumulative_return": benchmark_metrics["cumulative_return"],
+        "benchmark_annual_return": benchmark_metrics["annual_return"],
+        "benchmark_annual_volatility": benchmark_metrics["annual_volatility"],
+        "benchmark_sharpe": benchmark_metrics["sharpe_ratio"],
+        "benchmark_max_drawdown": benchmark_metrics["max_drawdown"],
+        "benchmark_calmar": benchmark_metrics["calmar_ratio"],
+
+        "excess_annual_return": (
+            strategy_metrics["annual_return"]
+            - benchmark_metrics["annual_return"]
+        ),
+        "sharpe_diff": (
+            strategy_metrics["sharpe_ratio"]
+            - benchmark_metrics["sharpe_ratio"]
+        ),
+        "drawdown_improvement": (
+            strategy_metrics["max_drawdown"]
+            - benchmark_metrics["max_drawdown"]
+        ),
+
+        "exposure": exposure,
+        "buy_count": buy_count,
+        "sell_count": sell_count,
+        "total_trade_count": buy_count + sell_count,
+        "total_transaction_cost": total_transaction_cost,
+    }
+
+
+def format_batch_summary(
+    batch_summary: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    生成中文展示版汇总表。
+    """
+
+    display_df = batch_summary.copy()
+
+    percent_cols = [
+        "strategy_cumulative_return",
+        "benchmark_cumulative_return",
+        "strategy_annual_return",
+        "benchmark_annual_return",
+        "excess_annual_return",
+        "strategy_annual_volatility",
+        "benchmark_annual_volatility",
+        "strategy_max_drawdown",
+        "benchmark_max_drawdown",
+        "drawdown_improvement",
+        "exposure",
+        "total_transaction_cost",
+    ]
+
+    for col in percent_cols:
+        display_df[col] = display_df[col].map(
+            lambda x: f"{x:.2%}"
+        )
+
+    ratio_cols = [
+        "strategy_sharpe",
+        "benchmark_sharpe",
+        "sharpe_diff",
+        "strategy_calmar",
+        "benchmark_calmar",
+    ]
+
+    for col in ratio_cols:
+        display_df[col] = display_df[col].map(
+            lambda x: "NaN" if pd.isna(x) else f"{x:.3f}"
+        )
+
+    display_df["start_date"] = pd.to_datetime(
+        display_df["start_date"]
+    ).dt.date
+
+    display_df["end_date"] = pd.to_datetime(
+        display_df["end_date"]
+    ).dt.date
+
+    display_df = display_df.rename(
+        columns={
+            "symbol": "股票代码",
+            "start_date": "开始日期",
+            "end_date": "结束日期",
+            "trade_days": "交易日数量",
+
+            "strategy_cumulative_return": "策略累计收益",
+            "strategy_annual_return": "策略年化收益",
+            "strategy_annual_volatility": "策略年化波动",
+            "strategy_sharpe": "策略夏普",
+            "strategy_max_drawdown": "策略最大回撤",
+            "strategy_calmar": "策略卡玛",
+
+            "benchmark_cumulative_return": "买入持有累计收益",
+            "benchmark_annual_return": "买入持有年化收益",
+            "benchmark_annual_volatility": "买入持有年化波动",
+            "benchmark_sharpe": "买入持有夏普",
+            "benchmark_max_drawdown": "买入持有最大回撤",
+            "benchmark_calmar": "买入持有卡玛",
+
+            "excess_annual_return": "超额年化收益",
+            "sharpe_diff": "夏普差值",
+            "drawdown_improvement": "回撤改善",
+
+            "exposure": "持仓比例",
+            "buy_count": "买入次数",
+            "sell_count": "卖出次数",
+            "total_trade_count": "总交易次数",
+            "total_transaction_cost": "交易成本简单加总",
+        }
+    )
+
+    return display_df
+
+
+def run_batch_ma_backtest(
+    stock_list: list[str] | None = None,
+    fast_window: int = 20,
+    slow_window: int = 60,
+    commission_rate: float = 0.0003,
+    slippage_rate: float = 0.0002,
+    annual_risk_free_rate: float = 0.0,
+    trading_days: int = 252,
+    save_result: bool = True,
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """
+    批量运行 20/60 均线回测。
+
+    Returns
+    -------
+    batch_summary:
+        每只股票一行的绩效汇总表。
+    batch_results:
+        每只股票完整逐日回测结果。
+    """
+
+    if stock_list is None:
+        stock_files = sorted(
+            PROCESSED_DIR.glob("*_clean.csv")
+        )
+
+        stock_list = [
+            file.stem.replace("_clean", "")
+            for file in stock_files
+        ]
+
+    batch_results = {}
+    summary_rows = []
+
+    for symbol in stock_list:
+        symbol = str(symbol).zfill(6)
+
+        file_path = (
+            PROCESSED_DIR
+            / f"{symbol}_clean.csv"
+        )
+
+        if not file_path.exists():
+            print(f"{symbol} 本地清洗文件不存在，跳过：{file_path}")
+            continue
+
+        print(f"正在回测：{symbol}")
+
+        stock_df = pd.read_csv(
+            file_path,
+            dtype={"symbol": str},
+        )
+
+        backtest_result = ma_cross_backtest(
+            df=stock_df,
+            fast_window=fast_window,
+            slow_window=slow_window,
+            commission_rate=commission_rate,
+            slippage_rate=slippage_rate,
+        )
+
+        summary = summarize_backtest_result(
+            result=backtest_result,
+            slow_window=slow_window,
+            annual_risk_free_rate=annual_risk_free_rate,
+            trading_days=trading_days,
+        )
+
+        batch_results[symbol] = backtest_result
+        summary_rows.append(summary)
+
+        if save_result:
+            backtest_result.to_csv(
+                BACKTEST_REPORT_DIR / f"{symbol}_ma_{fast_window}_{slow_window}_backtest.csv",
+                index=False,
+                encoding="utf-8-sig",
+            )
+
+    if not summary_rows:
+        return pd.DataFrame(), batch_results
+
+    batch_summary = pd.DataFrame(summary_rows)
+
+    batch_summary = (
+        batch_summary
+        .sort_values(
+            "strategy_sharpe",
+            ascending=False,
+        )
+        .reset_index(drop=True)
+    )
+
+    if save_result:
+        raw_path = (
+            REPORT_DIR
+            / f"ma_{fast_window}_{slow_window}_batch_summary_raw.csv"
+        )
+
+        display_path = (
+            REPORT_DIR
+            / f"ma_{fast_window}_{slow_window}_batch_summary_display.csv"
+        )
+
+        batch_summary.to_csv(
+            raw_path,
+            index=False,
+            encoding="utf-8-sig",
+        )
+
+        format_batch_summary(batch_summary).to_csv(
+            display_path,
+            index=False,
+            encoding="utf-8-sig",
+        )
+
+        print(f"原始批量回测结果已保存到：{raw_path}")
+        print(f"展示版批量回测结果已保存到：{display_path}")
+
+    return batch_summary, batch_results
+
+
+def summarize_backtest_period(
+    result: pd.DataFrame,
+    period_name: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    annual_risk_free_rate: float = 0.0,
+    trading_days: int = 252,
+) -> dict:
+    """
+    对单只股票在指定时间区间内的回测结果进行绩效汇总。
+
+    注意：
+    1. 回测信号仍然基于完整历史数据生成；
+    2. 这里只是在评价阶段切分时间区间；
+    3. 交易次数使用原始 position_change，不在切片后重新 diff；
+    4. 这样可以避免把区间开始时已有仓位误判为新买入。
+    """
+
+    required_cols = {
+        "date",
+        "symbol",
+        "slow_ma",
+        "position",
+        "position_change",
+        "strategy_return",
+        "asset_return",
+        "transaction_cost",
+    }
+
+    missing_cols = required_cols - set(result.columns)
+
+    if missing_cols:
+        raise ValueError(f"缺少必要字段：{sorted(missing_cols)}")
+
+    data = result.copy()
+
+    data["date"] = pd.to_datetime(data["date"])
+
+    symbol = (
+        data["symbol"]
+        .dropna()
+        .astype(str)
+        .str.zfill(6)
+        .iloc[0]
+    )
+
+    # 只保留策略真正可以开始交易后的区间
+    evaluation_mask = (
+        data["slow_ma"]
+        .shift(1)
+        .notna()
+    )
+
+    if start_date is not None:
+        evaluation_mask &= (
+            data["date"] >= pd.to_datetime(start_date)
+        )
+
+    if end_date is not None:
+        evaluation_mask &= (
+            data["date"] <= pd.to_datetime(end_date)
+        )
+
+    evaluation_data = (
+        data.loc[evaluation_mask]
+        .copy()
+        .reset_index(drop=True)
+    )
+
+    if evaluation_data.empty:
+        raise ValueError(
+            f"{symbol} 在 {period_name} 的评价区间为空"
+        )
+
+    strategy_metrics = calculate_performance(
+        returns=evaluation_data["strategy_return"],
+        annual_risk_free_rate=annual_risk_free_rate,
+        trading_days=trading_days,
+    )
+
+    benchmark_metrics = calculate_performance(
+        returns=evaluation_data["asset_return"],
+        annual_risk_free_rate=annual_risk_free_rate,
+        trading_days=trading_days,
+    )
+
+    buy_count = int(
+        (evaluation_data["position_change"] > 0).sum()
+    )
+
+    sell_count = int(
+        (evaluation_data["position_change"] < 0).sum()
+    )
+
+    exposure = float(
+        evaluation_data["position"].mean()
+    )
+
+    total_transaction_cost = float(
+        evaluation_data["transaction_cost"].sum()
+    )
+
+    return {
+        "period": period_name,
+        "symbol": symbol,
+        "start_date": evaluation_data["date"].iloc[0],
+        "end_date": evaluation_data["date"].iloc[-1],
+        "trade_days": len(evaluation_data),
+
+        "strategy_cumulative_return": strategy_metrics["cumulative_return"],
+        "strategy_annual_return": strategy_metrics["annual_return"],
+        "strategy_annual_volatility": strategy_metrics["annual_volatility"],
+        "strategy_sharpe": strategy_metrics["sharpe_ratio"],
+        "strategy_max_drawdown": strategy_metrics["max_drawdown"],
+        "strategy_calmar": strategy_metrics["calmar_ratio"],
+
+        "benchmark_cumulative_return": benchmark_metrics["cumulative_return"],
+        "benchmark_annual_return": benchmark_metrics["annual_return"],
+        "benchmark_annual_volatility": benchmark_metrics["annual_volatility"],
+        "benchmark_sharpe": benchmark_metrics["sharpe_ratio"],
+        "benchmark_max_drawdown": benchmark_metrics["max_drawdown"],
+        "benchmark_calmar": benchmark_metrics["calmar_ratio"],
+
+        "excess_annual_return": (
+            strategy_metrics["annual_return"]
+            - benchmark_metrics["annual_return"]
+        ),
+        "sharpe_diff": (
+            strategy_metrics["sharpe_ratio"]
+            - benchmark_metrics["sharpe_ratio"]
+        ),
+        "drawdown_improvement": (
+            strategy_metrics["max_drawdown"]
+            - benchmark_metrics["max_drawdown"]
+        ),
+
+        "exposure": exposure,
+        "buy_count": buy_count,
+        "sell_count": sell_count,
+        "total_trade_count": buy_count + sell_count,
+        "total_transaction_cost": total_transaction_cost,
+    }
+
+
+def run_ma_parameter_grid_search(
+    stock_list: list[str],
+    param_grid: list[tuple[int, int]],
+    in_sample_end: str = "2024-12-31",
+    commission_rate: float = 0.0003,
+    slippage_rate: float = 0.0002,
+    annual_risk_free_rate: float = 0.0,
+    trading_days: int = 252,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    在样本内对多个均线参数组合进行批量测试。
+
+    注意：
+    1. 这里只用于样本内参数比较；
+    2. 不使用样本外结果选择参数；
+    3. 每个参数组合都会对 stock_list 中的所有股票进行回测；
+    4. 返回每只股票、每组参数的一行样本内绩效。
+    """
+
+    grid_rows = []
+    grid_results = {}
+
+    for fast_window, slow_window in param_grid:
+        print(f"\n正在测试参数：{fast_window}/{slow_window}")
+
+        if fast_window >= slow_window:
+            print(
+                f"跳过非法参数：{fast_window}/{slow_window}"
+            )
+            continue
+
+        for symbol in stock_list:
+            symbol = str(symbol).zfill(6)
+
+            file_path = (
+                PROCESSED_DIR
+                / f"{symbol}_clean.csv"
+            )
+
+            if not file_path.exists():
+                print(f"{symbol} 文件不存在，跳过")
+                continue
+
+            stock_df = pd.read_csv(
+                file_path,
+                dtype={"symbol": str},
+            )
+
+            backtest_result = ma_cross_backtest(
+                df=stock_df,
+                fast_window=fast_window,
+                slow_window=slow_window,
+                commission_rate=commission_rate,
+                slippage_rate=slippage_rate,
+            )
+
+            summary = summarize_backtest_period(
+                result=backtest_result,
+                period_name="in_sample",
+                start_date=None,
+                end_date=in_sample_end,
+                annual_risk_free_rate=annual_risk_free_rate,
+                trading_days=trading_days,
+            )
+
+            summary["fast_window"] = fast_window
+            summary["slow_window"] = slow_window
+            summary["ma_param"] = f"{fast_window}/{slow_window}"
+
+            grid_rows.append(summary)
+
+            grid_results[
+                (symbol, fast_window, slow_window)
+            ] = backtest_result
+
+    grid_summary = pd.DataFrame(grid_rows)
+
+    if grid_summary.empty:
+        return grid_summary, grid_results
+
+    grid_summary = (
+        grid_summary
+        .sort_values(
+            [
+                "fast_window",
+                "slow_window",
+                "symbol",
+            ]
+        )
+        .reset_index(drop=True)
+    )
+
+    return grid_summary, grid_results
 
 
 if __name__ == "__main__":
