@@ -92,15 +92,11 @@ def get_single_stock(
 # =========================
 # 数据清洗函数
 # =========================
-def clean_stock_data(symbol: str, period: str = "daily", adjust: str = "qfq", save_to_local: bool = True) -> pd.DataFrame:
-    """
-    清洗单只股票行情数据。
-    兼容英文列名和部分中文列名。
-    """
-    file_path = RAW_DIR / f"{symbol}_{adjust}_{period}.csv"
-    df = pd.read_csv(file_path)
-    if df.empty:
-        print(f"{symbol} 数据为空，请确认是否已获得股票数据")
+def clean_stock_data(
+    df: pd.DataFrame,
+    symbol: str,
+    save_to_local: bool = True,
+) -> pd.DataFrame:
     data = df.copy()
 
     rename_map = {
@@ -113,7 +109,6 @@ def clean_stock_data(symbol: str, period: str = "daily", adjust: str = "qfq", sa
         "成交量": "volume",
         "成交额": "amount",
         "换手率": "turnover",
-        "流通股本": "outstanding_share",
     }
 
     data = data.rename(columns=rename_map)
@@ -127,11 +122,14 @@ def clean_stock_data(symbol: str, period: str = "daily", adjust: str = "qfq", sa
 
     # 日期转换
     data["date"] = pd.to_datetime(data["date"])
+    data = data.sort_values("date").drop_duplicates("date").reset_index(drop=True)
 
-    # 按日期升序排列
-    data = data.sort_values("date").reset_index(drop=True)
+    required_cols = ["date", "symbol", "open", "high", "low", "close"]
+    missing = [col for col in required_cols if col not in data.columns]
 
-    # 保留核心列
+    if missing:
+        raise ValueError(f"缺少必要字段：{missing}")
+
     keep_cols = [
         "date",
         "symbol",
@@ -146,8 +144,8 @@ def clean_stock_data(symbol: str, period: str = "daily", adjust: str = "qfq", sa
 
     # 有些数据源可能没有 turnover，所以这里只保留实际存在的列
     keep_cols = [col for col in keep_cols if col in data.columns]
-
     data = data[keep_cols]
+    
     if save_to_local:
         data.to_csv(output_path = PROCESSED_DIR / f"{symbol}_clean.csv", index=False, encoding="utf-8-sig")
     return data

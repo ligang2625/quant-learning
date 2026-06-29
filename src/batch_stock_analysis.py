@@ -1,7 +1,7 @@
 from pathlib import Path
 import time
 import pandas as pd
-import matplotlib as plt
+import matplotlib.pyplot as plt
 
 from metrics import calc_stock_metrics
 from get_single_stock import get_single_stock, clean_stock_data
@@ -76,23 +76,20 @@ def get_batch_stock(
 
 def batch_stock_analysis(stock_list: list):
     
-    if end_date is None:
-        end_date = pd.Timestamp.today().strftime("%Y%m%d")
     results = []
+
     for symbol in stock_list:
-        # 5. 计算指标
-        stock_df = pd.read_csv(PROCESSED_DIR / f"{symbol}_clean.csv")
-        if stock_df.empty:
-            print(f"{symbol} 清洗后数据为空，跳过")
+        file_path = PROCESSED_DIR / f"{symbol}_clean.csv"
+
+        if not file_path.exists():
+            print(f"{symbol} 本地文件不存在，跳过")
             continue
+
+        stock_df = pd.read_csv(file_path)
         metrics = calc_stock_metrics(stock_df)
         results.append(metrics)
-        print(f"{symbol} 处理完成，数据行数：{len(stock_df)}")
-    # =========================
-    # 汇总结果
-    # =========================
+
     if not results:
-        print("没有成功计算任何股票指标，请检查数据获取或清洗流程。")
         return pd.DataFrame()
     result_df = pd.DataFrame(results)
     # 按夏普比率从高到低排序

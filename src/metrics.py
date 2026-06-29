@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-import matplotlib as plt
+import matplotlib.pyplot as plt
 
 def calc_stock_metrics(df: pd.DataFrame, price_col: str = "close", get_df: bool = False):
     """
@@ -60,7 +60,7 @@ def calc_stock_metrics(df: pd.DataFrame, price_col: str = "close", get_df: bool 
         "max_drawdown_end_value": data.loc[max_drawdown_end_idx, "net_value"],
     }
 
-    return result if get_df else data
+    return result if not get_df else data
 
 def print_metrics(metrics: dict):
     print(f"股票代码: {metrics['symbol']}")
