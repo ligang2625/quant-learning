@@ -1,0 +1,4 @@
+﻿fold_id,selected_ma_param,parameter_switch,stock_trade_count,boundary_transaction_cost,boundary_cost_adjustment
+1,25/110,False,4,0.002,0.002
+2,25/110,False,0,0.0,0.0
+3,25/100,True,0,0.0,0.0
