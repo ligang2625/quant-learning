@@ -1,0 +1,3 @@
+﻿ma_param,observation_count,active_return_sum,active_log_return_sum,missed_upside_loss,avoided_downside_benefit,transaction_cost_loss,net_timing_benefit,benefit_cost_ratio,missed_upside_days,avoided_downside_days,captured_upside_days,suffered_downside_days,primary_failure_driver
+10/40,23253,-5.135406544825686,-2.588333403564687,80.37501841876757,75.59361187394188,0.354,-4.7814065448256855,0.9363871053381738,5172,5234,5795,5905,missed_upside
+20/60,23253,-3.926179945896207,-1.44614392429368,77.57128923121512,73.86560928531893,0.22050000000000003,-3.7056799458961933,0.9495296356505353,4974,5090,5993,6049,missed_upside
