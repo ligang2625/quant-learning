@@ -1,0 +1,11 @@
+﻿check,passed
+v2部分仓位比例低于v1,True
+v2仍减少二元策略错过上涨,True
+v2规避下跌收益保留率至少95%,True
+v2的benefit_cost_ratio高于v1,True
+v2主动对数收益高于v1,True
+v2相对二元策略夏普胜率至少60%,True
+v2平均回撤恶化不超过0.3个百分点,True
+v2换手增量低于v1,True
+v2成本增量低于v1,True
+v2增量收益股票胜率至少60%,True

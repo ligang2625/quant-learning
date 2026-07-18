@@ -1,0 +1,6 @@
+﻿stage,total_count,avg_count_per_stock,retention_rate_vs_previous
+1_bearish_ma,4232,846.4,
+2_recent_exit,1994,398.8,0.47117202268431
+3_price_above_fast_ma,796,159.2,0.399197592778335
+4_fast_ma_slope_up,375,75.0,0.47110552763819097
+5_strong_rebound,143,28.6,0.38133333333333336

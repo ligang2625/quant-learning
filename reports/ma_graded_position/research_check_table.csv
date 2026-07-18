@@ -1,0 +1,8 @@
+﻿check,passed
+错过上涨损失下降,True
+benefit_cost_ratio 提高,False
+主动对数收益改善,True
+年化收益改善中位数为正,True
+夏普改善胜率至少60%,True
+新增仓位增量收益为正,True
+回撤平均恶化不超过3个百分点,True
