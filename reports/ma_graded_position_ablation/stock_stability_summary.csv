@@ -1,0 +1,4 @@
+﻿candidate_name,return_win_rate,sharpe_win_rate,drawdown_win_rate,worst_return_diff,worst_sharpe_diff
+v2_no_fast_ma_slope,0.6,0.6,0.6,-0.00415040107920206,-0.01979496544030135
+v2_no_rebound_score,0.8,0.8,0.8,-0.008559289491895328,-0.017249203316672235
+v2_no_recent_exit,0.8,0.8,0.6,-0.007514532795275253,-0.03254740384050067

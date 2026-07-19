@@ -59,6 +59,58 @@ GRADED_POSITION_REPORT_DIR = (
 
 SignalVersion = Literal["v1", "v2"]
 
+V2_ABLATION_SPECS: dict[
+    str,
+    dict[str, bool],
+] = {
+    "v2_full": {
+        "use_recent_exit_condition": True,
+        "use_rebound_score_condition": True,
+        "use_fast_ma_slope_condition": True,
+    },
+    "v2_no_recent_exit": {
+        "use_recent_exit_condition": False,
+        "use_rebound_score_condition": True,
+        "use_fast_ma_slope_condition": True,
+    },
+    "v2_no_rebound_score": {
+        "use_recent_exit_condition": True,
+        "use_rebound_score_condition": False,
+        "use_fast_ma_slope_condition": True,
+    },
+    "v2_no_fast_ma_slope": {
+        "use_recent_exit_condition": True,
+        "use_rebound_score_condition": True,
+        "use_fast_ma_slope_condition": False,
+    },
+}
+
+V2_COMBINATION_SPECS: dict[
+    str,
+    dict[str, bool],
+] = {
+    "recent_exit_and_slope": {
+        "use_recent_exit_condition": True,
+        "use_rebound_score_condition": False,
+        "use_fast_ma_slope_condition": True,
+    },
+    "recent_exit_only": {
+        "use_recent_exit_condition": True,
+        "use_rebound_score_condition": False,
+        "use_fast_ma_slope_condition": False,
+    },
+    "slope_only": {
+        "use_recent_exit_condition": False,
+        "use_rebound_score_condition": False,
+        "use_fast_ma_slope_condition": True,
+    },
+    "base_only": {
+        "use_recent_exit_condition": False,
+        "use_rebound_score_condition": False,
+        "use_fast_ma_slope_condition": False,
+    },
+}
+
 
 def _prepare_graded_price_data(
     df: pd.DataFrame,
@@ -386,26 +438,23 @@ def build_graded_signal_v2(
     partial_position: float = 0.3,
     max_days_since_exit: int = 20,
     rebound_score_threshold: float = 1.0,
+    use_recent_exit_condition: bool = True,
+    use_rebound_score_condition: bool = True,
+    use_fast_ma_slope_condition: bool = True,
 ) -> pd.DataFrame:
     """
-    第二版分级仓位信号。
+    构建第二版分级仓位信号。
 
-    规则：
+    固定基础条件：
 
-    1. fast_ma > slow_ma：
-       signal = 1.0
+    1. 均线仍为空头；
+    2. 收盘价站上快均线。
 
-    2. fast_ma <= slow_ma，且满足：
+    可消融条件：
 
-       - 距离最近退出 1～max_days_since_exit 日；
-       - close > fast_ma；
-       - fast_ma_slope > 0；
-       - rebound_score >= threshold；
-
-       signal = partial_position
-
-    3. 其他：
-       signal = 0.0
+    1. 距最近退出不超过指定天数；
+    2. 反弹强度达到阈值；
+    3. 快均线斜率转正。
     """
     result = data.copy()
 
@@ -425,11 +474,20 @@ def build_graded_signal_v2(
         data_name="data",
     )
 
+    # 固定基础条件。
     result["bearish_ma_condition"] = (
         ~result["binary_signal"]
         & result["slow_ma"].notna()
     )
 
+    result[
+        "price_above_fast_ma_condition"
+    ] = (
+        result["close"]
+        > result["fast_ma"]
+    )
+
+    # 三个原始过滤条件。
     result["recent_exit_condition"] = (
         result["days_since_exit"]
         .between(
@@ -439,33 +497,97 @@ def build_graded_signal_v2(
         )
     )
 
-    result["price_above_fast_ma_condition"] = (
-        result["close"]
-        > result["fast_ma"]
-    )
-
-    result["fast_ma_turning_up_condition"] = (
-        result["fast_ma_slope"] > 0
-    )
-
-    result["strong_rebound_condition"] = (
+    result[
+        "strong_rebound_condition"
+    ] = (
         result["rebound_score"]
         >= rebound_score_threshold
     )
 
+    result[
+        "fast_ma_turning_up_condition"
+    ] = (
+        result["fast_ma_slope"] > 0
+    )
+
+    # 保存条件是否启用，方便诊断。
+    result[
+        "recent_exit_filter_enabled"
+    ] = use_recent_exit_condition
+
+    result[
+        "rebound_score_filter_enabled"
+    ] = use_rebound_score_condition
+
+    result[
+        "fast_ma_slope_filter_enabled"
+    ] = use_fast_ma_slope_condition
+
+    always_true = pd.Series(
+        True,
+        index=result.index,
+        dtype=bool,
+    )
+
+    # 消融后，被移除的条件等价于全部通过。
+    if use_recent_exit_condition:
+        recent_exit_effective = (
+            result[
+                "recent_exit_condition"
+            ]
+        )
+    else:
+        recent_exit_effective = (
+            always_true
+        )
+
+    if use_rebound_score_condition:
+        rebound_score_effective = (
+            result[
+                "strong_rebound_condition"
+            ]
+        )
+    else:
+        rebound_score_effective = (
+            always_true
+        )
+
+    if use_fast_ma_slope_condition:
+        fast_ma_slope_effective = (
+            result[
+                "fast_ma_turning_up_condition"
+            ]
+        )
+    else:
+        fast_ma_slope_effective = (
+            always_true
+        )
+
+    result[
+        "recent_exit_effective_condition"
+    ] = recent_exit_effective
+
+    result[
+        "rebound_score_effective_condition"
+    ] = rebound_score_effective
+
+    result[
+        "fast_ma_slope_effective_condition"
+    ] = fast_ma_slope_effective
+
     result["partial_rebound_signal"] = (
         result["bearish_ma_condition"]
-        & result[
-            "recent_exit_condition"
-        ]
         & result[
             "price_above_fast_ma_condition"
         ]
         & result[
-            "fast_ma_turning_up_condition"
+            "recent_exit_effective_condition"
         ]
         & result[
-            "strong_rebound_condition"
+            "rebound_score_effective_condition"
+        ]
+        & result[
+            "fast_ma_slope_effective_condition"
         ]
     )
 
@@ -687,6 +809,9 @@ def graded_ma_backtest(
     fast_ma_slope_window: int = 3,
     max_days_since_exit: int = 20,
     rebound_score_threshold: float = 1.0,
+    use_recent_exit_condition: bool = True,
+    use_rebound_score_condition: bool = True,
+    use_fast_ma_slope_condition: bool = True,
     commission_rate: float = 0.0003,
     slippage_rate: float = 0.0002,
 ) -> pd.DataFrame:
@@ -806,6 +931,15 @@ def graded_ma_backtest(
             rebound_score_threshold=(
                 rebound_score_threshold
             ),
+            use_recent_exit_condition=(
+                use_recent_exit_condition
+            ),
+            use_rebound_score_condition=(
+                use_rebound_score_condition
+            ),
+            use_fast_ma_slope_condition=(
+                use_fast_ma_slope_condition
+            ),
         )
 
     data = (
@@ -875,7 +1009,38 @@ def graded_ma_backtest(
             slippage_rate
         ),
     )
+    
+    strategy_variant = (
+        _resolve_strategy_variant(
+            signal_version=signal_version,
+            use_recent_exit_condition=(
+                use_recent_exit_condition
+            ),
+            use_rebound_score_condition=(
+                use_rebound_score_condition
+            ),
+            use_fast_ma_slope_condition=(
+                use_fast_ma_slope_condition
+            ),
+        )
+    )
 
+    data["strategy_variant"] = (
+        strategy_variant
+    )
+
+    data[
+        "use_recent_exit_condition"
+    ] = use_recent_exit_condition
+
+    data[
+        "use_rebound_score_condition"
+    ] = use_rebound_score_condition
+
+    data[
+        "use_fast_ma_slope_condition"
+    ] = use_fast_ma_slope_condition
+    
     return data
 
 
@@ -891,6 +1056,9 @@ def run_batch_graded_ma_backtest(
     fast_ma_slope_window: int = 3,
     max_days_since_exit: int = 20,
     rebound_score_threshold: float = 1.0,
+    use_recent_exit_condition: bool = True,
+    use_rebound_score_condition: bool = True,
+    use_fast_ma_slope_condition: bool = True,
     commission_rate: float = 0.0003,
     slippage_rate: float = 0.0002,
     annual_risk_free_rate: float = 0.0,
@@ -903,6 +1071,21 @@ def run_batch_graded_ma_backtest(
     """
     统一批量运行 v1 或 v2 分级仓位策略。
     """
+    strategy_variant = (
+        _resolve_strategy_variant(
+            signal_version=signal_version,
+            use_recent_exit_condition=(
+                use_recent_exit_condition
+            ),
+            use_rebound_score_condition=(
+                use_rebound_score_condition
+            ),
+            use_fast_ma_slope_condition=(
+                use_fast_ma_slope_condition
+            ),
+        )
+    )
+    
     if stock_list is None:
         stock_files = sorted(
             PROCESSED_DIR.glob(
@@ -929,7 +1112,7 @@ def run_batch_graded_ma_backtest(
 
     output_dir = (
         GRADED_POSITION_REPORT_DIR
-        / signal_version
+        / strategy_variant
         / (
             f"ma_{fast_window}_"
             f"{slow_window}"
@@ -1004,6 +1187,15 @@ def run_batch_graded_ma_backtest(
             ),
             slippage_rate=(
                 slippage_rate
+            ),
+            use_recent_exit_condition=(
+                use_recent_exit_condition
+            ),
+            use_rebound_score_condition=(
+                use_rebound_score_condition
+            ),
+            use_fast_ma_slope_condition=(
+                use_fast_ma_slope_condition
             ),
         )
 
@@ -1154,6 +1346,18 @@ def run_batch_graded_ma_backtest(
                         ]
                     )
                 ),
+                 "strategy_variant": (
+                    strategy_variant
+                ),
+                "use_recent_exit_condition": (
+                    use_recent_exit_condition
+                ),
+                "use_rebound_score_condition": (
+                    use_rebound_score_condition
+                ),
+                "use_fast_ma_slope_condition": (
+                    use_fast_ma_slope_condition
+                ),
             }
         )
 
@@ -1197,6 +1401,316 @@ def run_batch_graded_ma_backtest(
     return (
         batch_summary,
         batch_results,
+    )
+
+
+def run_v2_ablation_experiment(
+    stock_list: Sequence[str] | None = None,
+    fast_window: int = 10,
+    slow_window: int = 40,
+    rebound_window: int = 5,
+    partial_position: float = 0.3,
+    volatility_window: int = 20,
+    fast_ma_slope_window: int = 3,
+    max_days_since_exit: int = 20,
+    rebound_score_threshold: float = 1.0,
+    commission_rate: float = 0.0003,
+    slippage_rate: float = 0.0002,
+    annual_risk_free_rate: float = 0.0,
+    trading_days: int = 252,
+    save_result: bool = False,
+) -> tuple[
+    pd.DataFrame,
+    dict[
+        str,
+        dict[str, pd.DataFrame],
+    ],
+]:
+    """
+    运行完整 v2 和三个单条件消融版本。
+
+    Returns
+    -------
+    experiment_summary:
+        所有版本的逐股票绩效汇总。
+
+    experiment_results:
+        {
+            "v2_full": {
+                symbol: daily_result,
+                ...
+            },
+            ...
+        }
+    """
+    summary_frames: list[
+        pd.DataFrame
+    ] = []
+
+    experiment_results: dict[
+        str,
+        dict[str, pd.DataFrame],
+    ] = {}
+
+    for (
+        expected_variant,
+        condition_config,
+    ) in V2_ABLATION_SPECS.items():
+
+        print(
+            "\n"
+            + "=" * 60
+        )
+        print(
+            f"运行消融版本："
+            f"{expected_variant}"
+        )
+        print(
+            "=" * 60
+        )
+
+        batch_summary, batch_results = (
+            run_batch_graded_ma_backtest(
+                stock_list=stock_list,
+                fast_window=fast_window,
+                slow_window=slow_window,
+                rebound_window=(
+                    rebound_window
+                ),
+                partial_position=(
+                    partial_position
+                ),
+                signal_version="v2",
+                volatility_window=(
+                    volatility_window
+                ),
+                fast_ma_slope_window=(
+                    fast_ma_slope_window
+                ),
+                max_days_since_exit=(
+                    max_days_since_exit
+                ),
+                rebound_score_threshold=(
+                    rebound_score_threshold
+                ),
+                use_recent_exit_condition=(
+                    condition_config[
+                        "use_recent_exit_condition"
+                    ]
+                ),
+                use_rebound_score_condition=(
+                    condition_config[
+                        "use_rebound_score_condition"
+                    ]
+                ),
+                use_fast_ma_slope_condition=(
+                    condition_config[
+                        "use_fast_ma_slope_condition"
+                    ]
+                ),
+                commission_rate=(
+                    commission_rate
+                ),
+                slippage_rate=(
+                    slippage_rate
+                ),
+                annual_risk_free_rate=(
+                    annual_risk_free_rate
+                ),
+                trading_days=(
+                    trading_days
+                ),
+                save_result=save_result,
+            )
+        )
+
+        if not batch_summary.empty:
+            actual_variants = set(
+                batch_summary[
+                    "strategy_variant"
+                ].unique()
+            )
+
+            if actual_variants != {
+                expected_variant
+            }:
+                raise ValueError(
+                    "消融版本名称不一致："
+                    f"expected={expected_variant}, "
+                    f"actual={actual_variants}"
+                )
+
+            summary_frames.append(
+                batch_summary
+            )
+
+        experiment_results[
+            expected_variant
+        ] = batch_results
+
+    if summary_frames:
+        experiment_summary = pd.concat(
+            summary_frames,
+            ignore_index=True,
+        )
+    else:
+        experiment_summary = (
+            pd.DataFrame()
+        )
+
+    return (
+        experiment_summary,
+        experiment_results,
+    )
+
+
+def run_graded_condition_experiment(
+    experiment_specs: dict[
+        str,
+        dict[str, bool],
+    ],
+    stock_list: Sequence[str] | None = None,
+    fast_window: int = 10,
+    slow_window: int = 40,
+    rebound_window: int = 5,
+    partial_position: float = 0.3,
+    volatility_window: int = 20,
+    fast_ma_slope_window: int = 3,
+    max_days_since_exit: int = 20,
+    rebound_score_threshold: float = 1.0,
+    commission_rate: float = 0.0003,
+    slippage_rate: float = 0.0002,
+    annual_risk_free_rate: float = 0.0,
+    trading_days: int = 252,
+    save_result: bool = False,
+) -> tuple[
+    pd.DataFrame,
+    dict[str, dict[str, pd.DataFrame]],
+]:
+    """
+    根据传入的条件配置运行分级仓位实验。
+    """
+    if not experiment_specs:
+        raise ValueError(
+            "experiment_specs 不能为空"
+        )
+
+    summary_frames: list[
+        pd.DataFrame
+    ] = []
+
+    experiment_results: dict[
+        str,
+        dict[str, pd.DataFrame],
+    ] = {}
+
+    for (
+        experiment_name,
+        condition_config,
+    ) in experiment_specs.items():
+
+        required_config_keys = {
+            "use_recent_exit_condition",
+            "use_rebound_score_condition",
+            "use_fast_ma_slope_condition",
+        }
+
+        missing_keys = (
+            required_config_keys
+            - set(condition_config)
+        )
+
+        if missing_keys:
+            raise ValueError(
+                f"{experiment_name} 缺少配置："
+                f"{sorted(missing_keys)}"
+            )
+
+        print()
+        print("=" * 60)
+        print(
+            f"运行组合版本："
+            f"{experiment_name}"
+        )
+        print("=" * 60)
+
+        batch_summary, batch_results = (
+            run_batch_graded_ma_backtest(
+                stock_list=stock_list,
+                fast_window=fast_window,
+                slow_window=slow_window,
+                rebound_window=(
+                    rebound_window
+                ),
+                partial_position=(
+                    partial_position
+                ),
+                signal_version="v2",
+                volatility_window=(
+                    volatility_window
+                ),
+                fast_ma_slope_window=(
+                    fast_ma_slope_window
+                ),
+                max_days_since_exit=(
+                    max_days_since_exit
+                ),
+                rebound_score_threshold=(
+                    rebound_score_threshold
+                ),
+                use_recent_exit_condition=(
+                    condition_config[
+                        "use_recent_exit_condition"
+                    ]
+                ),
+                use_rebound_score_condition=(
+                    condition_config[
+                        "use_rebound_score_condition"
+                    ]
+                ),
+                use_fast_ma_slope_condition=(
+                    condition_config[
+                        "use_fast_ma_slope_condition"
+                    ]
+                ),
+                commission_rate=(
+                    commission_rate
+                ),
+                slippage_rate=(
+                    slippage_rate
+                ),
+                annual_risk_free_rate=(
+                    annual_risk_free_rate
+                ),
+                trading_days=trading_days,
+                save_result=save_result,
+            )
+        )
+
+        batch_summary = (
+            batch_summary.copy()
+        )
+
+        batch_summary[
+            "experiment_name"
+        ] = experiment_name
+
+        summary_frames.append(
+            batch_summary
+        )
+
+        experiment_results[
+            experiment_name
+        ] = batch_results
+
+    experiment_summary = pd.concat(
+        summary_frames,
+        ignore_index=True,
+    )
+
+    return (
+        experiment_summary,
+        experiment_results,
     )
 
 
@@ -2751,6 +3265,46 @@ def plot_stock_nav_comparison(
     figure.tight_layout()
 
     return figure, axis
+
+
+def _resolve_strategy_variant(
+    signal_version: SignalVersion,
+    use_recent_exit_condition: bool,
+    use_rebound_score_condition: bool,
+    use_fast_ma_slope_condition: bool,
+) -> str:
+    """
+    根据启用的过滤条件生成策略版本名称。
+    """
+    if signal_version == "v1":
+        return "v1"
+
+    disabled_conditions: list[str] = []
+
+    if not use_recent_exit_condition:
+        disabled_conditions.append(
+            "recent_exit"
+        )
+
+    if not use_rebound_score_condition:
+        disabled_conditions.append(
+            "rebound_score"
+        )
+
+    if not use_fast_ma_slope_condition:
+        disabled_conditions.append(
+            "fast_ma_slope"
+        )
+
+    if not disabled_conditions:
+        return "v2_full"
+
+    return (
+        "v2_no_"
+        + "_no_".join(
+            disabled_conditions
+        )
+    )
 
 
 def _check_graded_backtest_result(

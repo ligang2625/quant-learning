@@ -1,0 +1,5 @@
+﻿experiment_name,condition_count,avg_annual_return_diff,avg_sharpe_diff,avg_drawdown_diff,annual_return_win_rate,sharpe_win_rate,incremental_stock_win_rate,is_non_inferior
+recent_exit_and_slope,2,0.0,0.0,0.0,1.0,1.0,1.0,True
+recent_exit_only,1,-0.003801979286804791,-0.013192036949609853,-0.01086245992364585,0.2,0.2,0.2,False
+slope_only,1,-0.00011835836442481984,0.00837323467056172,-0.014244127838778509,0.4,0.6,0.4,False
+base_only,0,-0.0002193450916687656,0.0029810401864800154,-0.016013243710417457,0.4,0.4,0.4,False
